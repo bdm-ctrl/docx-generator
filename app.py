@@ -1,6 +1,15 @@
 from flask import Flask, request, jsonify, send_file
 from docx import Document
 from docx.shared import Pt, Cm
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib import colors
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from PIL import Image as PILImage
 import io
 import os
 import re
@@ -40,15 +49,172 @@ def replace_placeholders(doc, fields):
                 for nested_table in cell.tables:
                     replace_in_table(nested_table, fields)
     
-    # Replace in all paragraphs
     for paragraph in doc.paragraphs:
         replace_in_paragraph(paragraph, extended_fields)
     
-    # Replace in all tables
     for table in doc.tables:
         replace_in_table(table, extended_fields)
     
     return doc
+
+def generate_invoice_pdf(fields):
+    """Generate ENG Invoice PDF with logo and signature"""
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=2*cm,
+        leftMargin=2*cm,
+        topMargin=2*cm,
+        bottomMargin=2*cm
+    )
+    
+    styles = getSampleStyleSheet()
+    
+    # Стили
+    style_normal = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=14,
+    )
+    style_bold = ParagraphStyle(
+        'CustomBold',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=14,
+        fontName='Helvetica-Bold',
+    )
+    style_center_bold = ParagraphStyle(
+        'CustomCenterBold',
+        parent=styles['Normal'],
+        fontSize=11,
+        leading=16,
+        fontName='Helvetica-Bold',
+        alignment=TA_CENTER,
+    )
+    
+    story = []
+    
+    # Логотип
+    logo_path = 'static:logo.png'
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=1.5*cm, height=1.5*cm)
+        story.append(logo)
+        story.append(Spacer(1, 0.5*cm))
+    
+    # Реквизиты продавца (статичные)
+    seller_info = [
+        'Seller: Individual Entrepreneur HyperFlux',
+        'IIN: 880923050176',
+        'Address: 48, 21 Mamyr-7, Almaty, Kazakhstan, A10E9D2',
+        'Website: https://wind4tune.com',
+        'E-mail: support@wind4tune.com',
+    ]
+    for line in seller_info:
+        story.append(Paragraph(line, style_normal))
+    
+    story.append(Spacer(1, 0.4*cm))
+    
+    # Банковские реквизиты продавца (статичные)
+    story.append(Paragraph('Seller Banking details:', style_bold))
+    bank_info = [
+        'Beneficiary\'s name: Individual Entrepreneur HyperFlux',
+        'Bank name: Bank CenterCredit JSC',
+        'Beneficiary\'s bank address: 38 Al-Farabi Ave., Almaty, A25D5G0, Republic of Kazakhstan',
+        'SWIFT / BIC code: KCJBKZKX',
+        f'IBAN / Account number: {fields.get("seller_iban", "KZ918562204233254882")}',
+    ]
+    for line in bank_info:
+        story.append(Paragraph(line, style_normal))
+    
+    story.append(Spacer(1, 0.6*cm))
+    
+    # Номер и дата инвойса
+    story.append(Paragraph(f'Invoice No.: {fields.get("invoice_number", "")}', style_normal))
+    story.append(Paragraph(f'Date: {fields.get("invoice_date", "")}', style_normal))
+    
+    story.append(Spacer(1, 0.4*cm))
+    
+    # Данные клиента (динамичные)
+    story.append(Paragraph(f'Customer: {fields.get("customer_name", "")}', style_normal))
+    story.append(Paragraph(f'VAT number: {fields.get("customer_vat", "")}', style_normal))
+    story.append(Paragraph(f'UEN: {fields.get("customer_uen", "")}', style_normal))
+    story.append(Paragraph(f'Beneficiary\'s Address: {fields.get("customer_address", "")}', style_normal))
+    
+    story.append(Spacer(1, 0.4*cm))
+    
+    # Банк клиента (динамичные)
+    story.append(Paragraph('Beneficiary\'s Bank:', style_normal))
+    story.append(Paragraph(f'IBAN: {fields.get("customer_iban", "")}', style_normal))
+    story.append(Paragraph(f'BIC: {fields.get("customer_bic", "")}', style_normal))
+    story.append(Paragraph(f'Intermediary BIC: {fields.get("customer_intermediary_bic", "")}', style_normal))
+    story.append(Paragraph(f'Bank address: {fields.get("customer_bank_address", "")}', style_normal))
+    
+    story.append(Spacer(1, 0.6*cm))
+    
+    # Текст обращения (статичный)
+    story.append(Paragraph('Dear Customer,', style_normal))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph(
+        'Below you will find your order\'s specifications and the commercial terms thereof. '
+        'The order is regulated by the General Terms and Conditions of Sale available on our '
+        'website at https://wind4tune.com. The purchase of an online event specified herein '
+        'becomes binding only after receipt by the seller of the payment under this invoice in full.',
+        style_normal
+    ))
+    
+    story.append(Spacer(1, 0.5*cm))
+    
+    # Название мероприятия
+    story.append(Paragraph(f'Virtual Event: {fields.get("event_name", "")}', style_center_bold))
+    
+    story.append(Spacer(1, 0.4*cm))
+    
+    # Таблица с деталями заказа
+    story.append(Paragraph('Additional Order Details', style_bold))
+    story.append(Spacer(1, 0.2*cm))
+    
+    table_data = [
+        ['Date:', fields.get("event_date", "")],
+        ['Duration:', fields.get("event_time", "")],
+        ['Additional participants:', fields.get("participants", "")],
+        ['Additional price:', f'{fields.get("currency", "€")} {fields.get("amount", "")}'],
+    ]
+    
+    table = Table(table_data, colWidths=[6*cm, 10*cm])
+    table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (0, -1), 0),
+    ]))
+    story.append(table)
+    
+    story.append(Spacer(1, 0.6*cm))
+    
+    # Финальный текст (статичный)
+    story.append(Paragraph(
+        'By accepting and paying this invoice you warrant that you have the total legal '
+        'capacity and authorisation to do so.',
+        style_normal
+    ))
+    
+    story.append(Spacer(1, 1.5*cm))
+    
+    # Подпись
+    signature_path = 'static:signature.png'
+    if os.path.exists(signature_path):
+        sig = Image(signature_path, width=4*cm, height=1.5*cm)
+        story.append(sig)
+    
+    story.append(Paragraph('______________________ / Sigalov Sergey', style_normal))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -68,7 +234,6 @@ def generate():
         if not doc_type:
             return jsonify({'error': 'doc_type is required'}), 400
         
-        # Map doc_type to template file
         template_map = {
             'doc_contract': 'templates/contract_template.docx',
             'doc_appendix': 'templates/appendix_template.docx',
@@ -83,16 +248,13 @@ def generate():
         if not os.path.exists(template_path):
             return jsonify({'error': f'Template not found: {template_path}'}), 404
         
-        # Load template and replace placeholders
         doc = Document(template_path)
         doc = replace_placeholders(doc, fields)
         
-        # Save to buffer
         buffer = io.BytesIO()
         doc.save(buffer)
         buffer.seek(0)
         
-        # Generate filename
         doc_number = fields.get('doc_number', 'draft')
         filename = f"{doc_type}_{doc_number}.docx"
         
@@ -101,6 +263,31 @@ def generate():
             as_attachment=True,
             download_name=filename,
             mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        )
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/generate-pdf', methods=['POST'])
+def generate_pdf():
+    try:
+        data = request.json
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        fields = data.get('fields', {})
+        
+        buffer = generate_invoice_pdf(fields)
+        
+        invoice_number = fields.get('invoice_number', 'draft')
+        filename = f"invoice_{invoice_number}.pdf"
+        
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/pdf'
         )
     
     except Exception as e:
