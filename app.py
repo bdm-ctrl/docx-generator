@@ -10,6 +10,20 @@ app = Flask(__name__)
 def replace_placeholders(doc, fields):
     """Replace all placeholders in document with actual values"""
     
+    # Маппинг алиасов для совместимости с шаблонами
+    aliases = {
+        'doc_date_day': 'contract_date_day',
+        'doc_date_month': 'contract_date_month',
+        'doc_number': 'contract_number',
+        'doc_date': 'contract_date',
+    }
+    
+    # Расширяем fields алиасами
+    extended_fields = dict(fields)
+    for original, alias in aliases.items():
+        if original in fields:
+            extended_fields[alias] = fields[original]
+    
     def replace_in_paragraph(paragraph, fields):
         for key, value in fields.items():
             placeholder = '{{' + key.upper() + '}}'
@@ -23,24 +37,22 @@ def replace_placeholders(doc, fields):
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
                     replace_in_paragraph(paragraph, fields)
-                for table in cell.tables:
-                    replace_in_table(table, fields)
+                for nested_table in cell.tables:
+                    replace_in_table(nested_table, fields)
     
     # Replace in all paragraphs
     for paragraph in doc.paragraphs:
-        replace_in_paragraph(paragraph, fields)
+        replace_in_paragraph(paragraph, extended_fields)
     
     # Replace in all tables
     for table in doc.tables:
-        replace_in_table(table, fields)
+        replace_in_table(table, extended_fields)
     
     return doc
-
 
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok'})
-
 
 @app.route('/generate', methods=['POST'])
 def generate():
@@ -93,7 +105,6 @@ def generate():
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
