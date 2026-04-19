@@ -98,6 +98,8 @@ def generate_invoice_pdf(fields):
         logo_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
         ]))
         story.append(logo_table)
     story.append(Spacer(1, 0.5*cm))
@@ -200,16 +202,27 @@ def generate_invoice_pdf(fields):
         style_normal
     ))
     
-    story.append(Spacer(1, 0.8*cm))
+    story.append(Spacer(1, 0.4*cm))
     
-    # Подпись — держим вместе на одной странице
+    # Подпись над чертой
     signature_path = 'static:signature.png'
     if os.path.exists(signature_path):
-        sig_elements = [
-            Image(signature_path, width=4*cm, height=1.5*cm),
-            Paragraph('______________________ / Sigalov Sergey', style_normal)
-        ]
-        story.append(KeepTogether(sig_elements))
+        sig_img = Image(signature_path, width=4*cm, height=1.5*cm)
+        sig_table = Table(
+            [
+                [sig_img, ''],
+                [Paragraph('______________________ / Sigalov Sergey', style_normal), '']
+            ],
+            colWidths=[8*cm, 9*cm]
+        )
+        sig_table.setStyle(TableStyle([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+        ]))
+        story.append(KeepTogether([sig_table]))
     else:
         story.append(Paragraph('______________________ / Sigalov Sergey', style_normal))
     
