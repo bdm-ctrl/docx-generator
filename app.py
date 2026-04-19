@@ -5,7 +5,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, KeepTogether
 from reportlab.lib import colors
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -17,9 +17,6 @@ import re
 app = Flask(__name__)
 
 def replace_placeholders(doc, fields):
-    """Replace all placeholders in document with actual values"""
-    
-    # Маппинг алиасов для совместимости с шаблонами
     aliases = {
         'doc_date_day': 'contract_date_day',
         'doc_date_month': 'contract_date_month',
@@ -27,7 +24,6 @@ def replace_placeholders(doc, fields):
         'doc_date': 'contract_date',
     }
     
-    # Расширяем fields алиасами
     extended_fields = dict(fields)
     for original, alias in aliases.items():
         if original in fields:
@@ -58,8 +54,6 @@ def replace_placeholders(doc, fields):
     return doc
 
 def generate_invoice_pdf(fields):
-    """Generate ENG Invoice PDF with logo and signature"""
-    
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -72,7 +66,6 @@ def generate_invoice_pdf(fields):
     
     styles = getSampleStyleSheet()
     
-    # Стили
     style_normal = ParagraphStyle(
         'CustomNormal',
         parent=styles['Normal'],
@@ -97,14 +90,19 @@ def generate_invoice_pdf(fields):
     
     story = []
     
-    # Логотип
+    # Логотип в верхнем левом углу
     logo_path = 'static:logo.png'
     if os.path.exists(logo_path):
         logo = Image(logo_path, width=1.5*cm, height=1.5*cm)
-        story.append(logo)
-        story.append(Spacer(1, 0.5*cm))
+        logo_table = Table([[logo]], colWidths=[17*cm])
+        logo_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        story.append(logo_table)
+    story.append(Spacer(1, 0.5*cm))
     
-    # Реквизиты продавца (статичные)
+    # Реквизиты продавца
     seller_info = [
         'Seller: Individual Entrepreneur HyperFlux',
         'IIN: 880923050176',
@@ -117,12 +115,12 @@ def generate_invoice_pdf(fields):
     
     story.append(Spacer(1, 0.4*cm))
     
-    # Банковские реквизиты продавца (статичные)
+    # Банковские реквизиты продавца
     story.append(Paragraph('Seller Banking details:', style_bold))
     bank_info = [
-        'Beneficiary\'s name: Individual Entrepreneur HyperFlux',
+        "Beneficiary's name: Individual Entrepreneur HyperFlux",
         'Bank name: Bank CenterCredit JSC',
-        'Beneficiary\'s bank address: 38 Al-Farabi Ave., Almaty, A25D5G0, Republic of Kazakhstan',
+        "Beneficiary's bank address: 38 Al-Farabi Ave., Almaty, A25D5G0, Republic of Kazakhstan",
         'SWIFT / BIC code: KCJBKZKX',
         f'IBAN / Account number: {fields.get("seller_iban", "KZ918562204233254882")}',
     ]
@@ -137,16 +135,16 @@ def generate_invoice_pdf(fields):
     
     story.append(Spacer(1, 0.4*cm))
     
-    # Данные клиента (динамичные)
+    # Данные клиента
     story.append(Paragraph(f'Customer: {fields.get("customer_name", "")}', style_normal))
     story.append(Paragraph(f'VAT number: {fields.get("customer_vat", "")}', style_normal))
     story.append(Paragraph(f'UEN: {fields.get("customer_uen", "")}', style_normal))
-    story.append(Paragraph(f'Beneficiary\'s Address: {fields.get("customer_address", "")}', style_normal))
+    story.append(Paragraph(f"Beneficiary's Address: {fields.get('customer_address', '')}", style_normal))
     
     story.append(Spacer(1, 0.4*cm))
     
-    # Банк клиента (динамичные)
-    story.append(Paragraph('Beneficiary\'s Bank:', style_normal))
+    # Банк клиента
+    story.append(Paragraph("Beneficiary's Bank:", style_normal))
     story.append(Paragraph(f'IBAN: {fields.get("customer_iban", "")}', style_normal))
     story.append(Paragraph(f'BIC: {fields.get("customer_bic", "")}', style_normal))
     story.append(Paragraph(f'Intermediary BIC: {fields.get("customer_intermediary_bic", "")}', style_normal))
@@ -154,14 +152,14 @@ def generate_invoice_pdf(fields):
     
     story.append(Spacer(1, 0.6*cm))
     
-    # Текст обращения (статичный)
+    # Текст обращения
     story.append(Paragraph('Dear Customer,', style_normal))
     story.append(Spacer(1, 0.3*cm))
     story.append(Paragraph(
-        'Below you will find your order\'s specifications and the commercial terms thereof. '
-        'The order is regulated by the General Terms and Conditions of Sale available on our '
-        'website at https://wind4tune.com. The purchase of an online event specified herein '
-        'becomes binding only after receipt by the seller of the payment under this invoice in full.',
+        "Below you will find your order's specifications and the commercial terms thereof. "
+        "The order is regulated by the General Terms and Conditions of Sale available on our "
+        "website at https://wind4tune.com. The purchase of an online event specified herein "
+        "becomes binding only after receipt by the seller of the payment under this invoice in full.",
         style_normal
     ))
     
@@ -172,7 +170,7 @@ def generate_invoice_pdf(fields):
     
     story.append(Spacer(1, 0.4*cm))
     
-    # Таблица с деталями заказа
+    # Таблица с деталями
     story.append(Paragraph('Additional Order Details', style_bold))
     story.append(Spacer(1, 0.2*cm))
     
@@ -195,22 +193,25 @@ def generate_invoice_pdf(fields):
     
     story.append(Spacer(1, 0.6*cm))
     
-    # Финальный текст (статичный)
+    # Финальный текст
     story.append(Paragraph(
         'By accepting and paying this invoice you warrant that you have the total legal '
         'capacity and authorisation to do so.',
         style_normal
     ))
     
-    story.append(Spacer(1, 1.5*cm))
+    story.append(Spacer(1, 0.8*cm))
     
-    # Подпись
+    # Подпись — держим вместе на одной странице
     signature_path = 'static:signature.png'
     if os.path.exists(signature_path):
-        sig = Image(signature_path, width=4*cm, height=1.5*cm)
-        story.append(sig)
-    
-    story.append(Paragraph('______________________ / Sigalov Sergey', style_normal))
+        sig_elements = [
+            Image(signature_path, width=4*cm, height=1.5*cm),
+            Paragraph('______________________ / Sigalov Sergey', style_normal)
+        ]
+        story.append(KeepTogether(sig_elements))
+    else:
+        story.append(Paragraph('______________________ / Sigalov Sergey', style_normal))
     
     doc.build(story)
     buffer.seek(0)
